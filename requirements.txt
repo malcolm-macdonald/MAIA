@@ -1,5 +1,4 @@
-# Cloud deployment requirements with audio dependencies enabled
-kokoro==0.9.4
+# Cloud deployment requirements with problematic audio packages removed
 certifi==2025.4.26
 fastapi>=0.115.12
 flask>=3.1.0
@@ -14,8 +13,6 @@ requests>=2.31.0
 numpy>=1.24.4
 colorama>=0.4.6
 python-dotenv>=1.0.0
-playsound>=1.3.0
-soundfile>=0.13.1
 transformers>=4.46.3
 torch>=2.4.1
 ollama>=0.4.7
@@ -24,8 +21,6 @@ protobuf>=3.20.3
 termcolor>=2.4.0
 pypdf>=5.4.0
 ipython>=8.13.0
-pyaudio>=0.2.14
-librosa>=0.10.2.post1
 selenium>=4.27.1
 markdownify>=1.1.0
 text2emotion>=0.0.5
@@ -47,11 +42,10 @@ ordered_set
 pypinyin
 redis>=5.0.0
 
-# Audio dependencies (may fail in cloud environments)
-# Uncomment if needed and cloud environment supports them:
-# kokoro==0.9.4
-# playsound>=1.3.0
-# soundfile>=0.13.1
-# pyaudio>=0.2.14
-# librosa>=0.10.2.post1
-# sacremoses>=0.0.53 
+# Audio dependencies removed for cloud deployment
+# These packages cause build failures in Railway/cloud environments:
+# kokoro==0.9.4           - TTS library requiring system audio
+# playsound>=1.3.0        - Audio playback causing build errors  
+# soundfile>=0.13.1       - Audio file processing library
+# pyaudio>=0.2.14         - Audio I/O requiring system dependencies
+# librosa>=0.10.2.post1   - Audio analysis library 
