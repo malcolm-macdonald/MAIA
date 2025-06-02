@@ -1,0 +1,23 @@
+[build]
+builder = "nixpacks"
+
+[build.nixpacksConfig]
+# Use the railway-optimized requirements if available
+phases.install = "pip install -r requirements.txt"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[environments.production.variables]
+PORT = "8000"
+REDIS_URL = "${{REDIS_URL}}"
+SEARXNG_URL = "http://localhost:8080"
+PYTHONPATH = "/app"
+
+# Browser configuration for cloud environment
+[environments.production.variables.browser]
+CHROME_BIN = "/usr/bin/google-chrome"
+CHROMEDRIVER_PATH = "/usr/bin/chromedriver" 
