@@ -6,8 +6,21 @@ import numpy as np
 import torch
 import time
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
-import librosa
-import pyaudio
+
+# Make audio dependencies optional for cloud deployment
+try:
+    import librosa
+    LIBROSA_AVAILABLE = True
+except ImportError:
+    print("Warning: librosa not available, speech resampling will be disabled")
+    LIBROSA_AVAILABLE = False
+
+try:
+    import pyaudio
+    PYAUDIO_AVAILABLE = True
+except ImportError:
+    print("Warning: pyaudio not available, microphone recording will be disabled")
+    PYAUDIO_AVAILABLE = False
 
 audio_queue = queue.Queue()
 done = False
@@ -16,20 +29,29 @@ class AudioRecorder:
     """
     AudioRecorder is a class that records audio from the microphone and adds it to the audio queue.
     """
-    def __init__(self, format: int = pyaudio.paInt16, channels: int = 1, rate: int = 4096, chunk: int = 8192, record_seconds: int = 5, verbose: bool = False):
-        self.format = format
+    def __init__(self, format: int = None, channels: int = 1, rate: int = 4096, chunk: int = 8192, record_seconds: int = 5, verbose: bool = False):
+        self.enabled = PYAUDIO_AVAILABLE
+        if not self.enabled:
+            if verbose:
+                print(Fore.YELLOW + "AudioRecorder: Disabled - pyaudio not available" + Fore.RESET)
+            return
+            
+        self.format = format if format is not None else (pyaudio.paInt16 if PYAUDIO_AVAILABLE else None)
         self.channels = channels
         self.rate = rate
         self.chunk = chunk
         self.record_seconds = record_seconds
         self.verbose = verbose
-        self.audio = pyaudio.PyAudio()
-        self.thread = threading.Thread(target=self._record, daemon=True)
+        self.audio = pyaudio.PyAudio() if PYAUDIO_AVAILABLE else None
+        self.thread = threading.Thread(target=self._record, daemon=True) if self.enabled else None
 
     def _record(self) -> None:
         """
         Record audio from the microphone and add it to the audio queue.
         """
+        if not self.enabled or not self.audio:
+            return
+            
         stream = self.audio.open(format=self.format, channels=self.channels, rate=self.rate,
                                  input=True, frames_per_buffer=self.chunk)
         if self.verbose:
@@ -58,11 +80,13 @@ class AudioRecorder:
 
     def start(self) -> None:
         """Start the recording thread."""
-        self.thread.start()
+        if self.enabled and self.thread:
+            self.thread.start()
 
     def join(self) -> None:
         """Wait for the recording thread to finish."""
-        self.thread.join()
+        if self.enabled and self.thread:
+            self.thread.join()
 
 class Transcript:
     """
@@ -112,8 +136,18 @@ class Transcript:
             audio_data = audio_data.astype(np.float32) / np.iinfo(audio_data.dtype).max
         if len(audio_data.shape) > 1:
             audio_data = np.mean(audio_data, axis=1)
+        
+        # Handle sample rate conversion with optional librosa
         if sample_rate != 16000:
-            audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+            if LIBROSA_AVAILABLE:
+                audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+            else:
+                # Simple naive resampling as fallback (not ideal but functional)
+                print(f"Warning: librosa not available, using naive resampling from {sample_rate} to 16000")
+                resample_ratio = 16000 / sample_rate
+                new_length = int(len(audio_data) * resample_ratio)
+                audio_data = np.interp(np.linspace(0, len(audio_data), new_length), np.arange(len(audio_data)), audio_data)
+        
         result = self.pipe(audio_data)
         return self.remove_hallucinations(result["text"])
     
