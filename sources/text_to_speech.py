@@ -5,9 +5,27 @@ import subprocess
 from sys import modules
 from typing import List, Tuple, Type, Dict
 
-from kokoro import KPipeline
-from IPython.display import display, Audio
-import soundfile as sf
+# Make audio dependencies optional for cloud deployment
+try:
+    from kokoro import KPipeline
+    KOKORO_AVAILABLE = True
+except ImportError:
+    print("Warning: kokoro not available, TTS functionality will be disabled")
+    KPipeline = None
+    KOKORO_AVAILABLE = False
+
+try:
+    from IPython.display import display, Audio
+    IPYTHON_AVAILABLE = True
+except ImportError:
+    IPYTHON_AVAILABLE = False
+    
+try:
+    import soundfile as sf
+    SOUNDFILE_AVAILABLE = True
+except ImportError:
+    print("Warning: soundfile not available, audio file saving will be disabled")
+    SOUNDFILE_AVAILABLE = False
 
 if __name__ == "__main__":
     from utility import pretty_print, animate_thinking
@@ -33,9 +51,20 @@ class Speech():
         }
         self.pipeline = None
         self.language = language
-        if enable:
-            self.pipeline = KPipeline(lang_code=self.lang_map[language])
-        self.voice = self.voice_map[language][voice_idx]
+        self.enabled = enable and KOKORO_AVAILABLE
+        
+        if self.enabled and KPipeline:
+            try:
+                self.pipeline = KPipeline(lang_code=self.lang_map[language])
+            except Exception as e:
+                print(f"Warning: Failed to initialize TTS pipeline: {e}")
+                self.enabled = False
+                self.pipeline = None
+        
+        if voice_idx < len(self.voice_map[language]):
+            self.voice = self.voice_map[language][voice_idx]
+        else:
+            self.voice = self.voice_map[language][0]
         self.speed = 1.2
         self.voice_folder = ".voices"
         self.create_voice_folder(self.voice_folder)
@@ -57,29 +86,42 @@ class Speech():
             sentence (str): The text to convert to speech. Will be pre-processed.
             voice_idx (int, optional): Index of the voice to use from the voice map.
         """
-        if not self.pipeline:
+        if not self.enabled or not self.pipeline:
+            # TTS is disabled or not available, skip silently
             return
+            
         if voice_idx >= len(self.voice_map[self.language]):
             pretty_print("Invalid voice number, using default voice", color="error")
             voice_idx = 0
         sentence = self.clean_sentence(sentence)
         audio_file = f"{self.voice_folder}/sample_{self.voice_map[self.language][voice_idx]}.wav"
         self.voice = self.voice_map[self.language][voice_idx]
-        generator = self.pipeline(
-            sentence, voice=self.voice,
-            speed=self.speed, split_pattern=r'\n+'
-        )
-        for i, (_, _, audio) in enumerate(generator):
-            if 'ipykernel' in modules: #only display in jupyter notebook.
-                display(Audio(data=audio, rate=24000, autoplay=i==0), display_id=False)
-            sf.write(audio_file, audio, 24000) # save each audio file
-            if platform.system().lower() == "windows":
-                import winsound
-                winsound.PlaySound(audio_file, winsound.SND_FILENAME)
-            elif platform.system().lower() == "darwin":  # macOS
-                subprocess.call(["afplay", audio_file])
-            else: # linux or other.
-                subprocess.call(["aplay", audio_file])
+        
+        try:
+            generator = self.pipeline(
+                sentence, voice=self.voice,
+                speed=self.speed, split_pattern=r'\n+'
+            )
+            for i, (_, _, audio) in enumerate(generator):
+                if IPYTHON_AVAILABLE and 'ipykernel' in modules: #only display in jupyter notebook.
+                    display(Audio(data=audio, rate=24000, autoplay=i==0), display_id=False)
+                
+                if SOUNDFILE_AVAILABLE:
+                    sf.write(audio_file, audio, 24000) # save each audio file
+                
+                # Try to play audio on different platforms
+                try:
+                    if platform.system().lower() == "windows":
+                        import winsound
+                        winsound.PlaySound(audio_file, winsound.SND_FILENAME)
+                    elif platform.system().lower() == "darwin":  # macOS
+                        subprocess.call(["afplay", audio_file])
+                    else: # linux or other.
+                        subprocess.call(["aplay", audio_file])
+                except Exception as e:
+                    print(f"Warning: Could not play audio: {e}")
+        except Exception as e:
+            print(f"Warning: TTS generation failed: {e}")
 
     def replace_url(self, url: re.Match) -> str:
         """
@@ -144,7 +186,7 @@ class Speech():
 
         if self.language == 'zh':
             sentence = re.sub(
-                r'[^\u4e00-\u9fff\s，。！？《》【】“”‘’（）()—]',
+                r'[^\u4e00-\u9fff\s，。！？《》【】"”‘’（）()—]',
                 '',
                 sentence
             )
